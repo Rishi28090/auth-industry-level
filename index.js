@@ -4,6 +4,7 @@ const app = express();
 const bcrypt = require("bcrypt");
 const session = require("express-session");
 const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
 const connectdb = require("./config/db.js");
 const User = require("./models/User.js");
@@ -116,5 +117,65 @@ app.get('/home', isAuth, (req, res) => res.render("home.ejs"));
 app.get("/logout", (req, res) => {
   req.session.destroy(() => res.redirect("/login"));
 });
+
+
+app.get("/forgot-password", (req, res) => {
+  res.render("forgot-password");
+});
+
+app.get("/reset-password", (req, res) => {
+  res.render("reset-password");
+});
+
+
+app.post("/forgot-password",async (req,res)=>{
+const {email} = req.body;
+
+const user = await User.findOne({email});
+if (!user) return res.send("If email exists, OTP sent");
+ const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  user.resetOTP = otp;
+  user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 min
+
+  await user.save();
+   const transporter = nodemailer.createTransport({
+     service: "gmail",
+     auth: {
+       user: process.env.EMAIL_USER,
+       pass: process.env.EMAIL_PASS,
+     },
+   }); 
+  
+   await transporter.sendMail({
+    to: email,
+    subject: "Password Reset OTP",
+    html: `<h2>Your OTP is: ${otp}</h2><p>Valid for 10 minutes</p>`
+  });
+
+  res.redirect("/reset-password");
+
+})
+
+app.post("/reset-password",async(req,res)=>{
+   const { email, otp, newPassword } = req.body;
+
+  const user = await User.findOne({
+    email,
+    resetOTP: otp,
+    otpExpiry: { $gt: Date.now() },
+  });
+
+  if (!user) return res.send("Invalid or expired OTP");
+
+  user.password = await bcrypt.hash(newPassword, 10);
+  user.resetOTP = null;
+  user.otpExpiry = null;
+
+  await user.save();
+
+  res.send("Password reset successful");
+})
+
 
 app.listen(PORT, () => console.log(`Server is running on ${PORT}`));
